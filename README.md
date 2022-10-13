@@ -1,4 +1,4 @@
-# ref_system_mosaiq
+# UNMCCC's Mosaiq "Ref System"
 The UNM Comprehensive Cancer Center (UNMCCC) uses the "Ref system" to extract, curate and stage a set of multi-uses datamarts using stored procedures.  
 
 A SQL server database powering the Mosaiq application serves as the local electronic health system (EHS) for the UNMCCC. As any EHS, Mosaiq tries to 
