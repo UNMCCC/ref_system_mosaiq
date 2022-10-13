@@ -11,3 +11,5 @@ including feeding UNMCCCs implementation of the OHDSI OMOP data model.
 
 Is this transferable to other Mosaiq implementations? Perhaps, but the code would have to be adapted and refactored.  The UNMCCC here uses 
 Github as version control system. If any collaboration arises, perfect. Welcome!
+
+This system was 99.8% developed by Debbie Healy. From here on, will be maintained by the UNMCCC Clinical Informatics folks.
