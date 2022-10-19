@@ -1,7 +1,7 @@
 USE [MosaiqAdmin]
 GO
 
-/****** Object:  StoredProcedure [dbo].[sp_Ref_SchSet_Charges]    Script Date: 10/13/2022 1:38:12 PM ******/
+/****** Object:  StoredProcedure [dbo].[sp_Ref_SchSet_Charges]    Script Date: 10/19/2022 1:08:33 PM ******/
 SET ANSI_NULLS ON
 GO
 
@@ -9,7 +9,7 @@ SET QUOTED_IDENTIFIER ON
 GO
 
 
-CREATE PROCEDURE [dbo].[sp_Ref_SchSet_Charges]
+ALTER PROCEDURE [dbo].[sp_Ref_SchSet_Charges]
 
 /*
 Author: Debbie Healy
@@ -57,7 +57,7 @@ select distinct chg_id as Old_Chg_Id
 into #OldIDs
 from #OLD
 
-select count(*) from #old
+--select count(*) from #old
 /*
 -- Select ALL charges; Compare to OLD Charges; only process NEW charges; combine OLD and NEW for deliver
 -- Criteria:
@@ -108,7 +108,10 @@ SELECT
 	mosaiq.dbo.fn_Date(chg.proc_DtTm) as appt_Date, -- REMEMBER, TIME of procedure may be different than scheduled appointment TIME
 	chg.chg_id,
 	isNULL(chg.sch_id,0) as chg_sch_id,
-	isNULL(ref_SchSets.apptDt_PatID, 0) as apptDt_PatID,
+	case when ref_SchSets.apptDt_PatID is null 
+	then CONCAT(convert(varchar(8),chg.Create_DtTm,112),'-',chg.chg_id,'-',chg.Pat_ID1)
+	else ref_SchSets.apptDt_PatID
+	end apptDt_PatID,
 	isNULL(sch.sch_set_id,0) as sch_set_id, -- not all charges will have a sch_id for various reasons
 	ref_SchSets.Appt_DtTm,
 	ref_SchSets.activity,
@@ -149,6 +152,7 @@ LEFT JOIN mosaiq.dbo.topog dx1 on chg.tpg_id1 = dx1.tpg_id
 LEFT JOIN mosaiq.dbo.topog dx2 on chg.tpg_id2 = dx2.tpg_id
 LEFT JOIN mosaiq.dbo.topog dx3 on chg.tpg_id3 = dx3.tpg_id
 LEFT JOIN mosaiq.dbo.topog dx4 on chg.tpg_id4 = dx4.tpg_id
+
 
 --select * from #New_chgs where chg_create_dtTm >= '2022-01-01'
 
@@ -229,4 +233,5 @@ where pat_id1 is not null
 
 END
 GO
+
 
