@@ -1,7 +1,7 @@
 USE [MosaiqAdmin]
 GO
 
-/****** Object:  StoredProcedure [dbo].[sp_Ref_Patient_Drugs_Administered]    Script Date: 3/8/2023 10:52:37 AM ******/
+/****** Object:  StoredProcedure [dbo].[sp_Ref_Patient_Drugs_Administered]    Script Date: 3/8/2023 10:53:45 AM ******/
 SET ANSI_NULLS ON
 GO
 
@@ -40,7 +40,7 @@ SELECT *
 INTO #OLD
 FROM Ref_Patient_Drugs_Administered
 
-/* For Incremental Add */
+
 
 DECLARE @LastAdmDtTm dateTime
 SET @LastAdmDtTm = 
@@ -48,6 +48,7 @@ SET @LastAdmDtTm =
 FROM Ref_Patient_Drugs_Administered)
 SELECT @LastAdmDtTm 
 
+select * from mosaiq.dbo.drug
 --  drop table #adm_NEW
 SELECT 
 	RXA.RXA_SET_ID, 
@@ -58,22 +59,27 @@ SELECT
 	RXA.Adm_DtTm	as Adm_Start_DtTm,
 	RXA.Adm_End_DtTm,
 	RXA.Adm_code,		-- Drug.Drg_id
-	isNull(Drg.Drug_Label, ' ') as Drug_Label,
-	isNull(Drg.Generic_name, ' ') as Drug_Generic_Name, 
-	--CASE -- get a CPT code in case drug cannot be identified via labe, type or MEDID (which is used to map to RxNorm and CXV vocabularies)
-		--when RXA.Adm_code <> 0 -- drug_id assigned (this is the norm) 
-		--then Drg.Drug_Label		
-		--Else isNull(cptRef.CPT_desc_mq, ' ')		--no drug name listed, only PRS_ID (CPT) given.  Occurred Pre-2016 for saline and dextrose solutions administered
-	--END Drug_Label,				-- add a new column for this in extract 
-	--CASE -- get a CPT code in case drug cannot be identified via label, type or MEDID (which is used to map to RxNorm and CXV vocabularies)
-		--when RXA.Adm_code <> 0 -- drug_id assigned (this is the norm) 
-		--then mosaiq.dbo.fn_GetObsDefLabel(Drg.Drug_Type)
-		--else isnull(cptRef.CPT_desc_mq, ' ')  -- no drug name listed, only PRS_ID (CPT) given.  Occurred Pre-2016 for saline and dextrose solutions administered
-	--END Drug_Generic_Name,  -- add a new column for this in extract 
+
+	CASE -- get a CPT code in case drug cannot be identified via label, type or MEDID (which is used to map to RxNorm and CXV vocabularies)
+		when RXA.Adm_code <> 0 -- drug_id assigned (this is the norm) 
+		then Drg.Drug_Label		
+		Else isNull(cptRef.CPT_desc_mq, ' ')		--no drug name listed, only PRS_ID (CPT) given.  Occurred Pre-2016 for saline and dextrose solutions administered
+	END Drug_Label,				-- add a new column for this in extract 
+	isNULL(Drg.generic_name, '') as Drug_Generic_Name,
+	/*
+	CASE -- get a CPT code in case drug cannot be identified via label, type or MEDID (which is used to map to RxNorm and CXV vocabularies)
+		when RXA.Adm_code <> 0 -- drug_id assigned (this is the norm) 
+		then mosaiq.dbo.fn_GetObsDefLabel(Drg.Drug_Type)
+		else isnull(cptRef.CPT_desc_mq, ' ')  -- no drug name listed, only PRS_ID (CPT) given.  Occurred Pre-2016 for saline and dextrose solutions administered
+	END Drug_Generic_Name,  -- add a new column for this in extract 
+	*/
 	isNULL(mosaiq.dbo.fn_GetObsDefLabel(Drg.Drug_Type), ' ') as Drug_Type, -- add a new column for this in extract
+	drg.MEDID AS FDB_MedID,  -- add a new column for this in extract
+	drg.RMID as FDB_RMID,
+	GCNSeqNo,
 	RXA.Adm_Amount,			--QUANTITY
-	isNull(Mosaiq.dbo.fn_GetObsDefLabel(RXA.Adm_Units), ' ')  as Adm_Units_desc,  -- DOSE_UNIT_SOURCE_VALUE
-	isNull(Mosaiq.dbo.fn_GetObsDefLabel(RXA.Admin_Route), ' ')  as Adm_Route_desc,  -- ROUTE_SOURCE_VALUE
+	Mosaiq.dbo.fn_GetObsDefLabel(RXA.Adm_Units)   as Adm_Units_desc,  -- DOSE_UNIT_SOURCE_VALUE
+	Mosaiq.dbo.fn_GetObsDefLabel(RXA.Admin_Route) as Adm_Route_desc,  -- ROUTE_SOURCE_VALUE
 	RXA.Status_Enum,
 	Case
 		when RXA.status_enum = 0 then 'Unknown' 
@@ -88,9 +94,6 @@ SELECT
 	orc.order_type,			-- pre-2013 order_type = 2; post-2013 order_type = 4; 
 	orc.Ord_Provider as ordering_provider_id,
 	drg.drg_id,
-	drg.MEDID AS FDB_MedID,  -- add a new column for this in extract
-	drg.RMID as FDB_RMID,
-	drg.GCNSeqNo,
 	RXA.PRS_ID			-- populated pre-2016 when no drug_id specified (ex: Saline solns) -- Unique key for Mosaiq.dbo.CPT and MosaiqAdmin.dbo.Ref_CPTs_and_Activities 
 into #adm_NEW
 	FROM MOSAIQ.dbo.PharmAdm RXA 
@@ -108,19 +111,22 @@ into #adm_NEW
 
 
 
+--select count(*)
+--from #adm_NEW
+
+select * from Mosaiq.dbo.DrugCodeMapping 
+
 -- drop table #DrugCodeMap
 -- get single mapping by medId and codeset (remove duplicates)
-select medId, codeset, CodeValue, CodeDescription, BestMatch, CodeType,
+select medId, rmid, codeset, CodeValue, CodeDescription, BestMatch, CodeType,
 Row_Number () OVER (Partition by medId, codeset order by  bestMatch desc, codevalue desc) as seq  
 	-- if there is 1-best-match select that one
 	-- if there are multiple best-matches, select the record with the highest codevalue (arbitrary assuming higher # is newer)
 	-- if there are no best batches, select the record with the highest best-match (arbitrary assuming higher # is newer )
-	-- 3/7/22 -- learned more about this mapping table from Mike (RS21) and this is probably not the best way to select the RxNorm 
-	-- 3/7/22 --SBD (Branded Drug), SCD (Clinical Drug); looks like MEDID is name/route / many-to-1 from medid to rxNorm.
 into #DrugCodeMap -- get only 1 map per medId in case of multiple entries in DrugCodeMapping 
 from Mosaiq.dbo.DrugCodeMapping 
-where medId is not null and codeset is not null
-order by medId, seq --codeset, codevalue, codedescription
+where (medId is not null or RMID is not null) --and codeset is not null
+order by codeDescription,  seq --codeset, codevalue, codedescription
 
 -- drop table #NEW
 select Distinct 
@@ -132,6 +138,11 @@ select Distinct
 	#adm_NEW.Drug_Label,
 	#adm_NEW.Drug_Generic_Name,
 	#adm_NEW.Drug_Type,
+	#adm_NEW.FDB_MedID,		-- FDB_RMID is not populated so linking to dcm on MedID
+	dcm1.CodeValue	as RxNorm_CodeValue,
+	dcm1.CodeType	as RxNorm_CodeType,
+	dcm2.CodeValue	as CVX_CodeValue,
+	dcm2.CodeType	as CVX_CodeType,
 	#adm_NEW.Adm_Amount,
 	#adm_NEW.Adm_Units_desc as Adm_Units,
 	#adm_NEW.Adm_Route_Desc as Adm_Route,
@@ -144,12 +155,6 @@ select Distinct
 	#adm_NEW.RXA_Set_ID, 
 	#adm_NEW.RXO_Set_ID, 
 	#adm_NEW.ORC_Set_ID,
-	#adm_NEW.FDB_MedID,
-	dcm1.CodeValue	as RxNorm_CodeValue,
-	dcm1.CodeType	as RxNorm_CodeType,
-	dcm2.CodeValue	as CVX_CodeValue,
-	dcm2.CodeType	as CVX_CodeType,
-	#adm_NEW.GCNSeqNo,
 	getDate() as run_date
 into #NEW
 from #adm_NEW
@@ -169,8 +174,8 @@ left join #DrugCodeMap dcm2 on #adm_NEW.FDB_MedID = dcm2.MedID and dcm2.CodeSet 
 
 
 /* In 5% of the records, drugs were administered but there is no captured appt.  
-Example:  pat_id1=54037 / appt_dt=2021-11-02 --> patient was scheduled for Rad Tx but was in hospital so appt was statused as B(reak) -- but patient was given morhpine?  was patient brought here?  
-Example:  pat_id1=14282 / appt_Dt=2010-01-05 --> patient was scheduled for infusion appt, but appt not statused -- 2 drugs admimstered
+Example:  pat_id1=5xxx7 / appt_dt=2021-11-02 --> patient was scheduled for Rad Tx but was in hospital so appt was statused as B(reak) -- but patient was given morhpine?  was patient brought here?  
+Example:  pat_id1=1xxx2 / appt_Dt=2010-01-05 --> patient was scheduled for infusion appt, but appt not statused -- 2 drugs admimstered
 select top 1000 * from #adm2
 select top 1000 * from #adm2 where first_SchSet_of_day is null 
 select count(*) from #adm
@@ -191,6 +196,11 @@ FROM (
 		drug_label,
 		drug_generic_name,
 		drug_type,
+		FDB_MedID,
+		RxNorm_CodeValue,
+		RxNorm_CodeType,
+		CVX_CodeValue,
+		CVX_CodeType,
 		adm_amount,
 		adm_units,
 		adm_route,
@@ -203,12 +213,6 @@ FROM (
 		rxa_set_id,
 		rxo_set_id,
 		orc_set_id,
-		FDB_MedID,
-		RxNorm_CodeValue,
-		RxNorm_CodeType,
-		CVX_CodeValue,
-		CVX_CodeType,
-		GCNSeqNo,
 		run_date
 	FROM #OLD
 	UNION
@@ -221,6 +225,11 @@ FROM (
 		drug_label,
 		drug_generic_name,
 		drug_type,
+		FDB_MedID,
+		RxNorm_CodeValue,
+		RxNorm_CodeType,
+		CVX_CodeValue,
+		CVX_CodeType,
 		adm_amount,
 		adm_units,
 		adm_route,
@@ -233,18 +242,12 @@ FROM (
 		rxa_set_id,
 		rxo_set_id,
 		orc_set_id,
-		FDB_MedID,
-		RxNorm_CodeValue,
-		RxNorm_CodeType,
-		CVX_CodeValue,
-		CVX_CodeType,
-		GCNSeqNo,
 		GetDate() as RunDate
 	FROM #NEW
 ) as A
 -- drop table #Data
 
---select top 100 * from #Data
+
 --select count(*) from #old
 --select count(*) from #new
 --select count(*) from #data
